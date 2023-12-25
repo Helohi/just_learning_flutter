@@ -1,134 +1,195 @@
-import 'dart:io';
-import 'dart:developer' show log;
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:path_provider_lesson/db/database.dart';
+import 'package:path_provider_lesson/model/student.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+void main() => runApp(const MyMaterialApp());
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MyMaterialApp extends StatelessWidget {
+  const MyMaterialApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      themeMode: ThemeMode.dark,
-      darkTheme: ThemeData.dark(),
-      home: const ReadWriteFileExample(),
+      theme: ThemeData.dark(),
+      home: const MyApp(),
     );
   }
 }
 
-class ReadWriteFileExample extends StatefulWidget {
-  const ReadWriteFileExample({super.key});
+class MyApp extends StatefulWidget {
+  const MyApp({super.key});
 
   @override
-  State<ReadWriteFileExample> createState() => _ReadWriteFileExampleState();
+  State<MyApp> createState() => _MyAppState();
 }
 
-class _ReadWriteFileExampleState extends State<ReadWriteFileExample> {
-  late final TextEditingController _textController;
-  late final FocusNode textFieldFocusNode;
-  static const kLocalFileName = 'demo_localfile.txt';
-  String _localFileContent = '';
-  String _localFilePath = kLocalFileName;
+class _MyAppState extends State<MyApp> {
+  final GlobalKey<FormState> _formStateKey = GlobalKey<FormState>();
+  final _studentNameController = TextEditingController();
+
+  late final Future<List<Student>> _studentsList;
+  String _studentName = '';
+  bool isUpdate = false;
+  int? studentIdForUpdate;
 
   @override
   void initState() {
-    textFieldFocusNode = FocusNode();
-    _textController = TextEditingController();
-    _readTextFromLocalFile();
-    _getLocalFile.then((file) => setState(() => _localFilePath = file.path));
     super.initState();
+    updateStudentsList();
   }
 
-  @override
-  void dispose() {
-    _textController.dispose();
-    textFieldFocusNode.dispose();
-    super.dispose();
+  void updateStudentsList() {
+    setState(() {
+      _studentsList = DBProvider.db.getStudents();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Local file read/write Demo'),
         centerTitle: true,
+        title: const Text('SQLite CRUD Demo'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
+      body: Column(
         children: [
-          const Text('Write to local file:'),
-          TextField(
-            focusNode: textFieldFocusNode,
-            controller: _textController,
-          ),
-          ButtonBar(
-            children: [
-              TextButton(
-                onPressed: () async {
-                  _readTextFromLocalFile();
-                  _textController.text = _localFileContent;
-                  FocusScope.of(context).requestFocus(textFieldFocusNode);
-                  log('Text from file was successfully loaded');
+          Form(
+            key: _formStateKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 10, left: 10, bottom: 10),
+              child: TextFormField(
+                validator: (value) {
+                  if (value == null) return 'Please Enter Student Name';
+                  if (value.trim() == '') return 'Only Space is Not Valid';
+                  return null;
                 },
-                child: const Text('Load'),
+                onSaved: (newValue) {
+                  _studentName = newValue ?? '';
+                },
+                controller: _studentNameController,
+                decoration: const InputDecoration(
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(
+                      color: Colors.greenAccent,
+                      width: 2,
+                      style: BorderStyle.solid,
+                    ),
+                  ),
+                  labelText: 'Student Name',
+                  icon: Icon(Icons.people),
+                ),
               ),
-              TextButton(
-                onPressed: () async {
-                  await _writeTextToLocalFile(_textController.text);
-                  _textController.clear();
-                  await _readTextFromLocalFile();
-                  log('Text was saved to file successfully');
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                onPressed: () {
+                  if (isUpdate) {
+                    if (_formStateKey.currentState!.validate()) {
+                      _formStateKey.currentState!.save();
+                      DBProvider.db
+                          .updateStudent(
+                        Student(
+                          id: studentIdForUpdate,
+                          name: _studentName,
+                        ),
+                      )
+                          .then(
+                        (value) {
+                          setState(() {
+                            isUpdate = false;
+                          });
+                        },
+                      );
+                    }
+                  } else {
+                    if (_formStateKey.currentState!.validate()) {
+                      _formStateKey.currentState!.save();
+                      DBProvider.db.insertStudent(Student(name: _studentName));
+                    }
+                  }
+                  _studentNameController.text = '';
+                  updateStudentsList();
                 },
-                child: const Text('Save'),
+                child: Text(isUpdate ? 'UPDATE' : 'ADD'),
+              ),
+              const SizedBox(width: 20.0),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () {
+                  _studentNameController.text = '';
+                  setState(() {
+                    isUpdate = false;
+                    studentIdForUpdate = null;
+                  });
+                },
+                child: Text(isUpdate ? 'CANCEL UPDATE' : 'CLEAR'),
               ),
             ],
           ),
-          ListTile(
-            contentPadding: const EdgeInsets.all(0),
-            title: const Text('Local file path:'),
-            subtitle: Text(_localFilePath),
-          ),
-          ListTile(
-            contentPadding: const EdgeInsets.all(0),
-            title: const Text('Local file content:'),
-            subtitle: Text(_localFileContent),
-          ),
+          const Divider(height: 5.0),
+          Expanded(
+              child: FutureBuilder(
+            future: _studentsList,
+            builder: (context, snapshot) {
+              if (snapshot.hasData) {
+                return generateList(context, snapshot.data!);
+              }
+              if (snapshot.data == null || snapshot.data!.isEmpty) {
+                return const Text('No Data Found');
+              }
+              return const CircularProgressIndicator();
+            },
+          )),
         ],
       ),
     );
   }
 
-  Future<String> get _getLocalPath async {
-    final derictory = await getApplicationDocumentsDirectory();
-    return derictory.path;
-  }
-
-  Future<File> get _getLocalFile async {
-    final path = await _getLocalPath;
-    return File('$path/$kLocalFileName');
-  }
-
-  Future<File> _writeTextToLocalFile(String text) async {
-    final file = await _getLocalFile;
-    return file.writeAsString(text);
-  }
-
-  Future _readTextFromLocalFile() async {
-    String content;
-    try {
-      final file = await _getLocalFile;
-      content = await file.readAsString();
-    } catch (e) {
-      content = 'Error loading local file: $e';
-    }
-
-    setState(() {
-      _localFileContent = content;
-    });
+  SingleChildScrollView generateList(
+      BuildContext context, List<Student> students) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.vertical,
+      child: SizedBox(
+        width: MediaQuery.of(context).size.width,
+        child: DataTable(
+          columns: const [
+            DataColumn(label: Text('NAME')),
+            DataColumn(label: Text('DELETE'))
+          ],
+          rows: students
+              .map(
+                (student) => DataRow(
+                  cells: [
+                    DataCell(
+                      Text(student.name),
+                      onTap: () {
+                        setState(() {
+                          isUpdate = true;
+                          studentIdForUpdate = student.id;
+                        });
+                        _studentNameController.text = student.name;
+                      },
+                    ),
+                    DataCell(
+                      IconButton(
+                        onPressed: () {
+                          DBProvider.db.deleteStudent(student.id!);
+                          updateStudentsList();
+                        },
+                        icon: const Icon(Icons.delete),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
   }
 }
